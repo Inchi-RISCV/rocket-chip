@@ -48,7 +48,7 @@ case class RocketCoreParams(
   useBPWatch: Boolean = false,
   mcontextWidth: Int = 0,
   scontextWidth: Int = 0,
-  nPMPs: Int = 8,
+  nPMPs: Int = 16,   //zxr: change for 2G memory
   nPerfCounters: Int = 0,
   haveBasicCounters: Boolean = true,
   haveCFlush: Boolean = false,
@@ -817,6 +817,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
   }
   val vpu_lsu_xcpt = io.vpu_commit.commit_vld && io.vpu_commit.exception_vld
+  val vpu_xcpt = vpu_lsu_xcpt || io.vpu_commit.commit_vld && io.vpu_commit.illegal_inst
 
   val wholeregistorInstructions = Seq(VL1RE8_V, VL1RE16_V, VL1RE32_V, VL1RE64_V, 
                             VL2RE8_V, VL2RE16_V, VL2RE32_V, VL2RE64_V,
@@ -938,7 +939,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
 //zxr: issue queue
 val vectorQueue = Module(new InsructionQueue(12))
-vectorQueue.io.flush := vpu_lsu_xcpt || io.vpu_commit.commit_vld && io.vpu_commit.illegal_inst
+vectorQueue.io.flush := vpu_xcpt
 vectorQueue.io.enqueueInfo.valid := wb_reg_valid && wb_ctrl.vector && !(wb_xcpt);  
 vectorQueue.io.enqueueInfo.bits.v_rs1 := wb_reg_rs1
 vectorQueue.io.enqueueInfo.bits.v_rs2 := wb_reg_rs2
@@ -950,11 +951,11 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
   svmqueue.io.in.valid := wb_reg_valid && wb_ctrl.vector && !(wb_xcpt);
   svmqueue.io.in.bits.s_v_pc := wb_reg_pc
   svmqueue.io.out.ready := io.vpu_commit.commit_vld
-  svmqueue.io.flush := vpu_lsu_xcpt || io.vpu_commit.commit_vld && io.vpu_commit.illegal_inst
+  svmqueue.io.flush := vpu_xcpt
 
   //zxr: issue vector instructions during the WB stage
 
-  io.vpu_issue.valid := vectorQueue.io.dequeueInfo.valid && !(vpu_lsu_xcpt || io.vpu_commit.commit_vld && io.vpu_commit.illegal_inst);
+  io.vpu_issue.valid := vectorQueue.io.dequeueInfo.valid && !vpu_xcpt;
   io.vpu_issue.bits.inst := vectorQueue.io.dequeueInfo.bits.v_inst
   io.vpu_issue.bits.rs1 := vectorQueue.io.dequeueInfo.bits.v_rs1
   io.vpu_issue.bits.rs2 := vectorQueue.io.dequeueInfo.bits.v_rs2
@@ -1033,13 +1034,14 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
   //zxr: change retire signal for vpu
   csr.io.retire := !wb_ctrl.vector && wb_valid ||  io.vpu_commit.commit_vld && !io.vpu_commit.exception_vld
   csr.io.inst(0) := (if (usingCompressed) Cat(Mux(wb_reg_raw_inst(1, 0).andR, wb_reg_inst >> 16, 0.U), wb_reg_raw_inst(15, 0)) else wb_reg_inst)
-   //wzw 如果发送到队列中则认为指令已经发出去了
+   
+   //zxr: Used to monitor the operating status of the VPU
   val table = RegInit(0.U(4.W))
   when(vectorQueue.io.enqueueInfo.fire && io.vpu_commit.commit_vld){
     table := table;
   }.elsewhen(vectorQueue.io.enqueueInfo.fire) {table := table + 1.U}
   .elsewhen(io.vpu_commit.commit_vld) {table := table - 1.U}
-  when (vpu_lsu_xcpt || io.vpu_commit.commit_vld&&io.vpu_commit.illegal_inst){table := 0.U}
+  when (vpu_xcpt){table := 0.U}
   //if vpu busy, satll rocket，jyf
   //not ready，要stall住标量和向量的发送，故ctrl_stalld置1，并导致ctrl_killd置1
   //isvectorrun,有向量指令在执行，但如果下一条仍是向量且ready仍能发
@@ -1124,6 +1126,9 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
 
   val sboard = new Scoreboard(32, true)
   sboard.clear(ll_wen, ll_waddr)
+    for (i <- 0 until 31) {
+        sboard.clear(vpu_xcpt, i.U)
+    }
   def id_sboard_clear_bypass(r: UInt) = {
     // ll_waddr arrives late when D$ has ECC, so reshuffle the hazard check
     if (!tileParams.dcache.get.dataECC.isDefined) ll_wen && ll_waddr === r
@@ -1166,7 +1171,6 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
   //wzw:add vpu_w_fpr to clear sboard
   val vpu_w_fpr=   (io.vpu_commit.commit_vld & io.vpu_commit.return_data_float_vld &(!io.vpu_commit.exception_vld))
   val vpu_w_fpr_e= (io.vpu_commit.return_data_float_vld & io.vpu_commit.exception_vld)
-  val vpu_flush_fp_sb = io.vpu_commit.commit_vld & io.vpu_commit.exception_vld
   val id_stall_fpu = if (usingFPU) {
     val fp_sboard = new Scoreboard(32)
     fp_sboard.set((wb_dcache_miss && wb_ctrl.wfd || io.fpu.sboard_set) && wb_valid || wb_vector_wfd && wb_reg_valid && (!wb_xcpt), wb_waddr)
@@ -1175,7 +1179,7 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
     //wzw: fp clear sboard
     fp_sboard.clear(vpu_w_fpr.asBool||vpu_w_fpr_e.asBool,io.vpu_commit.return_reg_idx)
     when(vpu_flush_fp_sb){
-      for(i <- 0 to 31){
+      for(i <- 0 until 31){
       fp_sboard.clear(vpu_flush_fp_sb,i.U)
     }
     }
@@ -1431,7 +1435,7 @@ if(coreParams.useVerif) {
   ver_module.io.uvm_in.fpu_ld := io.fpu.dmem_resp_val
   ver_module.io.uvm_in.evec := csr.io.evec
   ver_module.io.uvm_in.eret := csr.io.eret
-  ver_module.io.uvm_in.flush := vpu_lsu_xcpt || io.vpu_commit.commit_vld && io.vpu_commit.illegal_inst
+  ver_module.io.uvm_in.flush := vpu_xcpt
   ver_module.io.uvm_in.sfence := wb_reg_sfence
 
   dontTouch(io.verif.get)
