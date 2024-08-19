@@ -1019,7 +1019,7 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
                   * @Editors: wuzewei
                   * @Description: 若是vset(i)vl(i)信号，则写回的是从csr返回的vl的值
                   */
-                 Mux(wb_ctrl.vset,vset_issue_vconfig.vl,
+                 Mux(wb_ctrl.vset && wb_reg_valid,vset_issue_vconfig.vl,
                  Mux(ll_wen, ll_wdata,
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
                  Mux(wb_ctrl.mul, mul.map(_.io.resp.bits.data).getOrElse(wb_reg_wdata),
@@ -1126,9 +1126,10 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
 
   val sboard = new Scoreboard(32, true)
   sboard.clear(ll_wen, ll_waddr)
-    for (i <- 0 until 31) {
-        sboard.clear(vpu_xcpt, i.U)
-    }
+  //TODO: maybe need it later
+  //  for (i <- 1 to 31) {
+  //      sboard.clear(vpu_xcpt, i.U)
+  //  }
   def id_sboard_clear_bypass(r: UInt) = {
     // ll_waddr arrives late when D$ has ECC, so reshuffle the hazard check
     if (!tileParams.dcache.get.dataECC.isDefined) ll_wen && ll_waddr === r
@@ -1178,10 +1179,10 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
     fp_sboard.clear(io.fpu.sboard_clr, io.fpu.sboard_clra)
     //wzw: fp clear sboard
     fp_sboard.clear(vpu_w_fpr.asBool||vpu_w_fpr_e.asBool,io.vpu_commit.return_reg_idx)
-    when(vpu_flush_fp_sb){
-      for(i <- 0 until 31){
-      fp_sboard.clear(vpu_flush_fp_sb,i.U)
-    }
+    when(vpu_xcpt){
+      for(i <- 0 to 31){
+      fp_sboard.clear(vpu_xcpt,i.U)
+      }
     }
     checkHazards(fp_hazard_targets, fp_sboard.read _)
   } else false.B
