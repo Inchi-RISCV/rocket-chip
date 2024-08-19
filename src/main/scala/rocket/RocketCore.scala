@@ -1032,7 +1032,7 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
   csr.io.exception := wb_xcpt
   csr.io.cause := wb_cause
   //zxr: change retire signal for vpu
-  csr.io.retire := !wb_ctrl.vector && wb_valid ||  io.vpu_commit.commit_vld && !io.vpu_commit.exception_vld
+  csr.io.retire := !(wb_ctrl.vector || wb_reg_inst === ECALL || wb_reg_inst === EBREAK ) && wb_valid ||  io.vpu_commit.commit_vld && !io.vpu_commit.exception_vld
   csr.io.inst(0) := (if (usingCompressed) Cat(Mux(wb_reg_raw_inst(1, 0).andR, wb_reg_inst >> 16, 0.U), wb_reg_raw_inst(15, 0)) else wb_reg_inst)
    
    //zxr: Used to monitor the operating status of the VPU
