@@ -237,7 +237,7 @@ class UvmVerification(implicit p:Parameters) extends CoreModule{
   val eret_addr = RegEnable(io.uvm_out.csr_evec, 0.U, coreParams.useVerif.B)
   val commit_insn_r = RegEnable(io.uvm_out.commit_insn,0.U,io.uvm_out.commit_valid.asBool);
   io.uvm_out.commit_start := RegEnable(1.B, 0.B, coreParams.useVerif.B&(io.uvm_in.wb_reg_valid)&(io.uvm_out.commit_prevPc === "h8000_0000".U))
-  io.uvm_out.commit_valid := RegEnable(((io.uvm_in.wb_reg_valid)&(~io.uvm_in.wb_ctrl.vector))||io.uvm_in.vpu_commit_vld , 0.U, coreParams.useVerif.B)
+  io.uvm_out.commit_valid := RegEnable(((io.uvm_in.wb_reg_valid)&(~io.uvm_in.wb_ctrl.vector))|| (io.uvm_in.vpu_commit_vld & (~io.uvm_in.flush)) , 0.U, coreParams.useVerif.B)
   //io.uvm_out.commit_valid := RegEnable(((io.uvm_in.wb_reg_valid)&(~io.uvm_in.wb_ctrl.vector))||((io.uvm_in.wb_xcpt(0).asBool))||io.uvm_in.vpu_commit_vld , 0.U, coreParams.useVerif.B)
   io.uvm_out.commit_prevPc := RegEnable(Mux(q.io.out.fire,q.io.out.bits.prePc,io.uvm_in.wb_reg_pc), 0.U, coreParams.useVerif.B)
   //io.uvm_out.commit_currPc := Mux((io.uvm_out.commit_insn === (0x30200073.U)),eret_addr,Mux(trap_valid(0).asBool,eret_addr,RegEnable(Mux(q.io.out.fire,q.io.out.bits.currPc,wb_npc), 0.U, coreParams.useVerif.B)))
@@ -259,7 +259,7 @@ class UvmVerification(implicit p:Parameters) extends CoreModule{
   require(io.uvm_out.sim_halt != 3.U,"sim_halt should not be 3")
 
   // io.uvm_out.trap_valid := RegEnable(io.uvm_in.wb_xcpt, 0.U, coreParams.useVerif.B)
-  io.uvm_out.trap_valid := 0.U
+  io.uvm_out.trap_valid := trap_valid
   //  io.uvm_out.trap_pc := RegEnable(wb_reg_pc,0.U,coreParams.useVerif.B)
   io.uvm_out.trap_pc := 0.U
   //  io.uvm_out.trap_firstInsn := RegEnable(io.uvm_in.evec,0.U,coreParams.useVerif.B)
