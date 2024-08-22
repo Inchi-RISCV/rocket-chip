@@ -5,9 +5,9 @@ import utils._
 import chisel3._
 
 class RequestIO extends Bundle {
-    val data1 = UInt(128.W)
-    val data2 = UInt(128.W)
-    val data3 = UInt(256.W)
+    val data1 = UInt(DLEN.W)   //DLEN
+    val data2 = UInt(DLEN.W)   //DLEN
+    val data3 = UInt((2*DLEN).W)   //2*DLEN
     val funct7 = UInt(7.W)
     val rs2 = UInt(5.W)
     val rs1 = UInt(5.W)
@@ -19,7 +19,7 @@ class RequestIO extends Bundle {
 }
 
 class ResponseIO extends Bundle{
-    val resp_bits_data = UInt(256.W)
+    val resp_bits_data = UInt((2*DLEN).W)   //2*DLEN
 }
 
 class VcixIO extends Bundle{
