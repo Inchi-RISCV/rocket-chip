@@ -569,8 +569,9 @@ class CSRFile(
   val reg_vscause = Reg(Bits(xLen.W))
   val reg_vstval = Reg(UInt(vaddrBitsExtended.W))
   val reg_vsatp = Reg(new PTBR)
-
-  val reg_sepc = Reg(UInt(vaddrBitsExtended.W))
+  //zxr: change for test
+  val reg_sepc = Reg(UInt(xLen.W))
+  //val reg_sepc = Reg(UInt(vaddrBitsExtended.W))
   val reg_scause = Reg(Bits(xLen.W))
   val reg_stval = Reg(UInt(vaddrBitsExtended.W))
   val reg_sscratch = Reg(Bits(xLen.W))
@@ -1013,7 +1014,8 @@ class CSRFile(
   io.mideleg.get := read_mideleg
   io.medeleg.get := read_medeleg
   io.minstret.get := reg_instret
-  io.sepc.get := readEPC(reg_sepc).sextTo(xLen) 
+  //zxr:change for test
+  io.sepc.get := readEPC(reg_sepc)
   io.stval.get := reg_stval.sextTo(xLen) 
   io.stvec.get := read_stvec
   io.scause.get := reg_scause
@@ -1288,7 +1290,9 @@ class CSRFile(
     when (decoded_addr(CSRs.mscratch)) { reg_mscratch := wdata }
     if (mtvecWritable)
       when (decoded_addr(CSRs.mtvec))  { reg_mtvec := wdata }
-    when (decoded_addr(CSRs.mcause))   { reg_mcause := wdata & ((BigInt(1) << (xLen-1)) + (BigInt(1) << whichInterrupt.getWidth) - 1).U }
+      //zxr:change for sting test
+      when (decoded_addr(CSRs.mcause))   { reg_mcause := wdata}
+    //when (decoded_addr(CSRs.mcause))   { reg_mcause := wdata & ((BigInt(1) << (xLen-1)) + (BigInt(1) << whichInterrupt.getWidth) - 1).U }
     when (decoded_addr(CSRs.mtval))    { reg_mtval := wdata }
 
     if (usingNMI) {
@@ -1367,7 +1371,9 @@ class CSRFile(
       }
       when (decoded_addr(CSRs.sie))      { reg_mie := (reg_mie & ~sie_mask) | (wdata & sie_mask) }
       when (decoded_addr(CSRs.sscratch)) { reg_sscratch := wdata }
-      when (decoded_addr(CSRs.sepc))     { reg_sepc := formEPC(wdata) }
+      //zxr:change for test
+      //when (decoded_addr(CSRs.sepc))     { reg_sepc := formEPC(wdata) }
+      when (decoded_addr(CSRs.sepc))     { reg_sepc := wdata}
       when (decoded_addr(CSRs.stvec))    { reg_stvec := wdata }
       when (decoded_addr(CSRs.scause))   { reg_scause := wdata & scause_mask }
       when (decoded_addr(CSRs.stval))    { reg_stval := wdata }
