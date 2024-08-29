@@ -573,7 +573,9 @@ class CSRFile(
   val reg_sepc = Reg(UInt(xLen.W))
   //val reg_sepc = Reg(UInt(vaddrBitsExtended.W))
   val reg_scause = Reg(Bits(xLen.W))
-  val reg_stval = Reg(UInt(vaddrBitsExtended.W))
+  //zxr: change for test
+  //val reg_stval = Reg(UInt(vaddrBitsExtended.W))
+  val reg_stval = Reg(UInt(xLen.W))
   val reg_sscratch = Reg(Bits(xLen.W))
   val reg_stvec = Reg(UInt((if (usingHypervisor) vaddrBitsExtended else vaddrBits).W))
   val reg_satp = Reg(new PTBR)
@@ -1375,7 +1377,9 @@ class CSRFile(
       //when (decoded_addr(CSRs.sepc))     { reg_sepc := formEPC(wdata) }
       when (decoded_addr(CSRs.sepc))     { reg_sepc := wdata}
       when (decoded_addr(CSRs.stvec))    { reg_stvec := wdata }
-      when (decoded_addr(CSRs.scause))   { reg_scause := wdata & scause_mask }
+      //zxr:change for test
+      //when (decoded_addr(CSRs.scause))   { reg_scause := wdata & scause_mask }
+      when (decoded_addr(CSRs.scause))   { reg_scause := wdata}
       when (decoded_addr(CSRs.stval))    { reg_stval := wdata }
       when (decoded_addr(CSRs.mideleg))  { reg_mideleg := wdata }
       when (decoded_addr(CSRs.medeleg))  { reg_medeleg := wdata }
