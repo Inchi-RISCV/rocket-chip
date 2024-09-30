@@ -7,43 +7,153 @@ import darecreek.exu.vfu.VUopInfo
 
 import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.{Config, Field, Parameters}
+import darecreek.VInfoCalc
+import darecreek.VInfoAll
+import darecreek.VCtrl
+import darecreek.VIllegalInstrn
+import darecreek.VRobPtr
 
 class VDecodeOutput(implicit p: Parameters) extends Bundle{
-  val vCtrl = new darecreek.VCtrl
+  val vCtrl         = new darecreek.VCtrl
   val scalar_opnd_1 = UInt(64.W)
   val scalar_opnd_2 = UInt(64.W)
-  val vInfo = new VInfo
-  //val valid = Bool()
+  val float_opnd_1  = UInt(64.W)
+  val vInfo         = new VInfo
+  val eewEmulInfo   = new VInfoAll
+  val floatRed      = Bool()
+
+  //TODO: need to package the bundle from darecreek
+  //val extraInfo_for_VIllegal = new 
 }
 
 class SVDecodeUnit(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val in  = Flipped(Decoupled(new RVUissue))
     val out = Decoupled(new VDecodeOutput)
-    //val decode_ready = Output(Bool())
+    val vLSUXcpt = Input (new VLSUXcpt)
+    val exceptionOut = Input(Bool())
   })
 
+  val bufferReg = RegInit(0.U.asTypeOf(new RVUissue))
+  val bufferValidReg = RegInit(false.B)
+  val validReg = RegInit(false.B)
+  val illegalReg = RegInit(false.B)
+
+  //set buffer
+  when(!bufferValidReg && !(!validReg || io.out.ready) && io.in.valid){
+    bufferReg := io.in.bits
+    bufferValidReg := io.in.valid
+  }
+
+  //has exception, clear buffer
+  when(io.vLSUXcpt.exception_vld || io.vLSUXcpt.update_vl || io.out.bits.vCtrl.illegal || illegalReg){
+    bufferValidReg := false.B
+  }
+
+  //fire to pipeline reg, clear buffer
+  when(!validReg || io.out.ready){
+      bufferValidReg := false.B
+  }
+
+  val muxData = Wire(new RVUissue)
+  val muxValid = Wire(Bool())
+
+  muxData := Mux(bufferValidReg, bufferReg, io.in.bits)
+  muxValid := Mux(bufferValidReg, bufferValidReg, io.in.valid)
+
   val decode = Module(new VDecode)
-  decode.io.in := io.in.bits.inst
+  decode.io.in := muxData.inst
 
-  io.out.bits.vCtrl         := RegEnable(decode.io.out, io.in.valid)
-  io.out.bits.scalar_opnd_1 := RegEnable(io.in.bits.rs1, io.in.valid)
-  io.out.bits.scalar_opnd_2 := RegEnable(io.in.bits.rs2, io.in.valid)
+  val isFloatRedu =  decode.io.out.redu === true.B && decode.io.out.funct3 === "b001".U
   
-  io.out.valid             := RegNext(io.in.valid)
-  io.out.bits.vInfo.vstart := RegEnable(io.in.bits.vInfo.vstart, io.in.valid)
-  io.out.bits.vInfo.vl     := RegEnable(io.in.bits.vInfo.vl, io.in.valid)
-  io.out.bits.vInfo.vlmul  := RegEnable(io.in.bits.vInfo.vlmul, io.in.valid)
-  io.out.bits.vInfo.vsew   := RegEnable(io.in.bits.vInfo.vsew, io.in.valid)
-  io.out.bits.vInfo.vma    := RegEnable(io.in.bits.vInfo.vma, io.in.valid)  
-  io.out.bits.vInfo.vta    := RegEnable(io.in.bits.vInfo.vta, io.in.valid) 
-  io.out.bits.vInfo.vxrm   := RegEnable(io.in.bits.vInfo.vxrm, io.in.valid)
-  io.out.bits.vInfo.frm    := RegEnable(io.in.bits.vInfo.frm, io.in.valid)
+  val decodeOut = Wire(new VCtrl)
+  when(isFloatRedu){
+    decodeOut := decode.io.out
+    decodeOut.fp := true.B
+    decodeOut.redu := false.B
+  }.otherwise{
+    decodeOut := decode.io.out
+  }
 
-  //The following code is only for the mv instruction. It needs to be adjusted according to different instructions later.
+  val bitsIn = Wire(new VDecodeOutput)
 
+  bitsIn.vCtrl         := decodeOut
+  bitsIn.scalar_opnd_1 := muxData.rs1
+  bitsIn.scalar_opnd_2 := muxData.rs2
+  bitsIn.float_opnd_1  := muxData.frs1
+  bitsIn.floatRed      := isFloatRedu
+  
+  val infoCalc = Module(new VInfoCalc)
+  infoCalc.io.ctrl       := decode.io.out
+  infoCalc.io.csr.frm    := muxData.vInfo.frm   
+  infoCalc.io.csr.vxrm   := muxData.vInfo.vxrm  
+  infoCalc.io.csr.vl     := muxData.vInfo.vl    
+  infoCalc.io.csr.vstart := muxData.vInfo.vstart
+  infoCalc.io.csr.vsew   := muxData.vInfo.vsew  
+  infoCalc.io.csr.vill   := decode.io.out.illegal  
+  infoCalc.io.csr.ma     := muxData.vInfo.vma    
+  infoCalc.io.csr.ta     := muxData.vInfo.vta    
+  infoCalc.io.csr.vlmul  := muxData.vInfo.vlmul 
 
-  //Only receive one instruction, and then set ready to false
-  io.in.ready := RegNext(io.out.ready)
+  val vIllegalInstrn = Module(new VIllegalInstrn)
+  vIllegalInstrn.io.validIn    := muxValid
+  vIllegalInstrn.io.ctrl       := decode.io.out
+  vIllegalInstrn.io.csr.frm    := muxData.vInfo.frm   
+  vIllegalInstrn.io.csr.vxrm   := muxData.vInfo.vxrm  
+  vIllegalInstrn.io.csr.vl     := muxData.vInfo.vl    
+  vIllegalInstrn.io.csr.vstart := muxData.vInfo.vstart
+  vIllegalInstrn.io.csr.vsew   := muxData.vInfo.vsew  
+  vIllegalInstrn.io.csr.vill   := decode.io.out.illegal  
+  vIllegalInstrn.io.csr.ma     := muxData.vInfo.vma    
+  vIllegalInstrn.io.csr.ta     := muxData.vInfo.vta    
+  vIllegalInstrn.io.csr.vlmul  := muxData.vInfo.vlmul 
+
+  vIllegalInstrn.io.infoAll := infoCalc.io.infoAll
+  vIllegalInstrn.io.extraInfo_for_VIllegal := infoCalc.io.extraInfo_for_VIllegal
+  vIllegalInstrn.io.robPtrIn := 0.U.asTypeOf(new VRobPtr)
+
+  bitsIn.vCtrl.illegal := false.B
+
+  val decodeInValid = muxValid
+
+  bitsIn.vInfo.vstart  := muxData.vInfo.vstart
+  bitsIn.vInfo.vl      := muxData.vInfo.vl    
+  bitsIn.vInfo.vlmul   := muxData.vInfo.vlmul 
+  bitsIn.vInfo.vsew    := muxData.vInfo.vsew  
+  bitsIn.vInfo.vma     := muxData.vInfo.vma    
+  bitsIn.vInfo.vta     := muxData.vInfo.vta   
+  bitsIn.vInfo.vxrm    := muxData.vInfo.vxrm  
+  bitsIn.vInfo.frm     := muxData.vInfo.frm   
+
+  bitsIn.eewEmulInfo := infoCalc.io.infoAll
+
+  val bitsReg = RegInit(0.U.asTypeOf(new VDecodeOutput))
+
+  when(!validReg || io.out.ready){
+      validReg := decodeInValid
+  }
+
+  when(io.vLSUXcpt.exception_vld || io.vLSUXcpt.update_vl){
+    validReg := false.B
+  }
+ 
+  val fire = decodeInValid & (!validReg || io.out.ready)
+  when(fire) {
+      bitsReg := bitsIn
+  }
+ 
+  io.out.valid := validReg
+  io.out.bits  := bitsReg
+
+  io.out.bits.vCtrl.illegal := Mux(RegNext(fire), vIllegalInstrn.io.ill.valid, illegalReg) && validReg
+
+  when(io.out.bits.vCtrl.illegal){
+    illegalReg := true.B
+  }
+
+  when(io.exceptionOut){
+    illegalReg := false.B
+  }
+
+  io.in.ready := !bufferValidReg && ~io.out.bits.vCtrl.illegal && ~illegalReg
 }
-

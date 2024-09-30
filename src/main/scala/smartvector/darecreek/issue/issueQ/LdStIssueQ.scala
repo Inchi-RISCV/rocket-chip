@@ -1,4 +1,4 @@
-/**
+/** Ordered issue queue 
   * Constraint: so far all inputs of io.in share one 'ready'.
   *             Only support 1 output
   */
@@ -12,7 +12,6 @@ import utils._
 class VLdstIssueQ(size: Int, nEnq: Int) extends Module with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val in = Vec(nEnq, Flipped(Decoupled(new VExpdUOp)))
-    // from busy table
     val fromBusyTable = Vec(nEnq, Vec(4, Input(Bool()))) // true: busy
     // wakeups from RF write ports
     val vRFWriteback = Vec(nVRFWritePorts, Flipped(ValidIO(UInt(VPRegIdxWidth.W))))
@@ -73,12 +72,11 @@ class VLdstIssueQ(size: Int, nEnq: Int) extends Module with HasCircularQueuePtrH
     * Deq
     */
   val empty = isEmpty(enqPtr(0), deqPtr)
-  val validNumDeq = Mux(allSrcReady(deqPtr.value) && !empty, 1.U, 0.U)
-  val numDeqFire = Mux(io.out.ready, validNumDeq, 0.U)
-  io.out.bits := iq(deqPtr.value)
-  io.out.valid := numDeqFire === 1.U && !io.flush
-  when (numDeqFire === 1.U) { state(deqPtr.value) := IDLE }
+  val numDeqFire = Mux(io.out.ready && io.out.valid && !io.flush, 1.U, 0.U)
+  io.out.valid := state(deqPtr.value) === VALID && allSrcReady(deqPtr.value)
+  when (io.out.fire) { state(deqPtr.value) := IDLE }
   deqPtr := Mux(io.flush, 0.U.asTypeOf(new IQPtr), deqPtr + numDeqFire)
+  io.out.bits := iq(deqPtr.value)
 
   when(io.flush) { state.map(_ := IDLE) }
   io.empty := empty

@@ -30,7 +30,7 @@ class OutTypeClassify(val t: VFPU.FType) extends Module {
   isSubnormal := decoded.isSubnormal
 
   rsqrtType := VecInit(
-    sign && (!decoded.expIsOnes && !decoded.isZero),// [-inf, -0), output:canonicalNaN, NV
+    sign && ((!decoded.expIsOnes && !decoded.isZero) || (decoded.isInf)),// [-inf, -0), output:canonicalNaN, NV
     decoded.isZero && sign, // -0, output:-Inf, DZ
     decoded.isZero && !sign, // +0, output:+Inf, DZ
     !sign && (!decoded.expIsOnes && !decoded.isZero),// (+0, +inf), output:estimate
@@ -165,10 +165,10 @@ class VFRecDataModule(implicit val p: Parameters) extends VFPUPipelineModule {
     require(expOut.getWidth == f.expWidth && sigOut.getWidth == 7)
     val result = Mux1H(outType, Seq(
       FloatPoint.defaultNaNUInt(f.expWidth, f.precision),
- //     FloatPoint.infUInt(f.expWidth, f.precision, isNeg = true.B),
-  //    FloatPoint.infUInt(f.expWidth, f.precision, isNeg = false.B),
+      FloatPoint.infUInt(f.expWidth, f.precision, isNeg = true.B),
+      FloatPoint.infUInt(f.expWidth, f.precision, isNeg = false.B),
       Cat(f.sign, expOut, sigOut, 0.U((f.sigWidth - 7).W)),
-   //   FloatPoint.zeroUInt(f.expWidth, f.precision, isNeg = false.B),
+      FloatPoint.zeroUInt(f.expWidth, f.precision, isNeg = false.B),
       FloatPoint.defaultNaNUInt(f.expWidth, f.precision),
       FloatPoint.defaultNaNUInt(f.expWidth, f.precision))
     )
@@ -187,14 +187,14 @@ class VFRecDataModule(implicit val p: Parameters) extends VFPUPipelineModule {
   def recOutGen(f: FloatPoint, isActive: Bool, expOut: UInt, sigOut: UInt, outType: Seq[Bool]) = {
     val result = Mux1H(outType, Seq(
       Cat(f.sign, expOut, sigOut, 0.U((f.sigWidth - 7).W)),// rec7 output normal
-//      FloatPoint.zeroUInt(f.expWidth, f.precision, isNeg = f.sign), // +-0
+      FloatPoint.zeroUInt(f.expWidth, f.precision, isNeg = f.sign), // +-0
       Cat(f.sign, 0.U(f.expWidth.W), 1.U(2.W), sigOut, 0.U((f.sigWidth - 9).W)),// subnormal, sig shift 2
       Cat(f.sign, 0.U(f.expWidth.W), 1.U(1.W), sigOut, 0.U((f.sigWidth - 8).W)),// subnormal, sig shift 1
-    //  FloatPoint.greatestFinite(f.expWidth, f.precision, isNeg = true.B),// -greatest mag, NX, OF
-    //  FloatPoint.infUInt(f.expWidth, f.precision, isNeg = true.B),// -Inf,
-    //  FloatPoint.greatestFinite(f.expWidth, f.precision, isNeg = false.B),// +greatest mag, NX, OF
-    //  FloatPoint.infUInt(f.expWidth, f.precision, isNeg = false.B),// +inf, NX, OF
-    //  FloatPoint.infUInt(f.expWidth, f.precision, isNeg = f.sign), // +-Inf, DZ
+      FloatPoint.greatestFinite(f.expWidth, f.precision, isNeg = true.B),// -greatest mag, NX, OF
+      FloatPoint.infUInt(f.expWidth, f.precision, isNeg = true.B),// -Inf,
+      FloatPoint.greatestFinite(f.expWidth, f.precision, isNeg = false.B),// +greatest mag, NX, OF
+      FloatPoint.infUInt(f.expWidth, f.precision, isNeg = false.B),// +inf, NX, OF
+      FloatPoint.infUInt(f.expWidth, f.precision, isNeg = f.sign), // +-Inf, DZ
       FloatPoint.defaultNaNUInt(f.expWidth, f.precision),// NAN,
       FloatPoint.defaultNaNUInt(f.expWidth, f.precision))// NAN, NV (sNAN)
     )

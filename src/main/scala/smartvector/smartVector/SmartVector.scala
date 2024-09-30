@@ -8,11 +8,52 @@ import darecreek.exu.vfu.VFuParamsKey
 import darecreek.exu.vfu.VFuParameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.XSCoreParameters
+import SmartParam._
 
 class RVUTestResult extends Bundle {
     val commit_vld   = Output(Bool())
     val alu_data     = Output(UInt(128.W))
     //val reg_data     = Output(UInt(128.W))
+}
+
+class ScoreboardSetIO extends Bundle {
+    val setEn         = Input(Bool())
+    val setAddr       = Input(UInt(log2Ceil(NVPhyRegs).W))
+    val setMultiEn    = Input(Bool())
+    val setNum        = Input(UInt(log2Ceil(NVPhyRegs).W))
+}
+
+class ScoreboardClearIO extends Bundle {
+    val clearEn       = Input(Bool())
+    val clearAddr     = Input(UInt(log2Ceil(NVPhyRegs).W))
+    val clearMultiEn  = Input(Bool())
+    val clearNum      = Input(UInt((log2Ceil(NVPhyRegs)+1).W))
+    val clearAll      = Input(Bool())
+}
+
+class ScoreboardReadIO extends Bundle {
+    val readAddr1      = Input(UInt(log2Ceil(NVPhyRegs).W))
+    val readAddr2      = Input(UInt(log2Ceil(NVPhyRegs).W))
+    val readAddr3      = Input(UInt(log2Ceil(NVPhyRegs).W))
+    val readMaskAddr   = Input(UInt(log2Ceil(NVPhyRegs).W))
+    val readNum1       = Input(UInt(3.W))
+    val readNum2       = Input(UInt(3.W))
+    val readBypassed1  = Output(Bool())
+    val readBypassed1N = Output(Bool())
+    val readBypassed2  = Output(Bool())
+    val readBypassed2N = Output(Bool())
+    val readBypassed3  = Output(Bool())
+    val readBypassed3N = Output(Bool())
+    val readBypassed4  = Output(Bool())
+}
+
+class CommitInfo extends Bundle{
+    val scalarRegWriteEn = Bool()
+    val floatRegWriteEn = Bool()
+    val ldest = UInt(5.W)
+    val fflags = UInt(5.W)
+    val data = UInt(64.W)
+    val vxsat = Bool()
 }
 
 class SmartVector extends Module {
@@ -22,6 +63,10 @@ class SmartVector extends Module {
             val rvuCommit = new RVUCommit
             val rvuExtra  = new RVUExtra
         })
+        val rvuMemory = new RVUMemory
+        //TODO: This is reserved for verification, delete it later
+        //val rfData = Output(Vec(NVPhyRegs, UInt(VLEN.W)))
+        val rfData = Output(Vec(NVPhyRegs, UInt(VLEN.W)))
     })
 
 
@@ -32,76 +77,95 @@ class SmartVector extends Module {
     })
 
     val decoder = Module(new SVDecodeUnit()(p))
-    val split = Module(new VSplit()(p))
-    val iex = Module(new VIexWrapper()(p))
+    val split   = Module(new Vsplit()(p))
+    val merge   = Module(new VMerge()(p))
+    val commit  = Module(new VCommit())
+    val iex     = Module(new VIexWrapper()(p))
     val regFile = Module(new SVRegFileWrapper()(p))
+    // val svlsu   = Module(new SVlsu()(p))
+    // val svSegLsu = Module(new SVSegLsu()(p))
+
+    val svlsuWrapper = Module(new SVlsuWrapper()(p))
     
     decoder.io.in.bits  := io.in.bits
-    decoder.io.in.valid := io.in.valid
+    decoder.io.in.valid := io.in.valid & io.in.ready
     split.io.in.decodeIn <> decoder.io.out
-    split.io.in.regRileIn <> regFile.io.out
-    split.io.in.aluIn <> iex.io.out
-    //uopQueue.io.in.valid := decoder.io.out.valid
+    split.io.in.regFileIn <> regFile.io.out
     iex.io.in <> split.io.out.mUop
-    regFile.io.in.readIn := split.io.out.toRegFileRead
-    regFile.io.in.writeIn := split.io.out.toRegFileWrite
-        
-    //arb register file's read and write port
-    //when(uopQueue.io.out.toRegFile.valid && iex.io.out.bits.toReg.valid){
-    //    regFile.io.in.rfReadEn    := uopQueue.io.out.toRegFile.bits.rfReadEn
-    //    regFile.io.in.rfReadIdx   := uopQueue.io.out.toRegFile.bits.rfReadIdx
-    //    regFile.io.in.rfWriteEn   := iex.io.out.bits.toReg.bits.rfWriteEn
-    //    regFile.io.in.rfWriteData := iex.io.out.bits.toReg.bits.rfWriteData
-    //    regFile.io.in.rfWriteIdx  := iex.io.out.bits.toReg.bits.rfWriteIdx
-    //    regFile.io.in.vxsat       := iex.io.out.bits.toReg.bits.vxsat
-    //}.elsewhen(uopQueue.io.out.toRegFile.valid && !iex.io.out.bits.toReg.valid){
-    //    regFile.io.in := uopQueue.io.out.toRegFile.bits
-    //}.elsewhen(!uopQueue.io.out.toRegFile.valid && iex.io.out.bits.toReg.valid){
-    //    regFile.io.in := iex.io.out.bits.toReg.bits
-    //}.otherwise{
-    //    regFile.io.in.rfReadEn(0) := false.B
-    //    regFile.io.in.rfReadEn(1) := false.B
-    //    regFile.io.in.rfWriteEn   := false.B
-    //    regFile.io.in.rfWriteData := DontCare
-    //    regFile.io.in.rfWriteIdx  := DontCare
-    //    regFile.io.in.rfReadIdx   := DontCare
-    //    regFile.io.in.vxsat       := false.B
-    //}
-//
-    //The code is based on the "all the muop is done in one cycle"
-    //val scalarRegWriteEn_E3 = Reg(Bool())
-    //scalarRegWriteEn_E3 := split.io.out.mUop.bits.uopAttribute.scalarRegWriteEn
-//
-    //val scalarRegWriteEn_E4 = Reg(Bool())
-    //scalarRegWriteEn_E4 := scalarRegWriteEn_E3
-//
-    //val scalarRegWriteIdx_E3 = Reg(UInt(5.W))
-    //scalarRegWriteIdx_E3 := split.io.out.mUop.bits.uopAttribute.ldest
-//
-    //val scalarRegWriteIdx_E4 = Reg(UInt(5.W))
-    //scalarRegWriteIdx_E4 := scalarRegWriteIdx_E3    
-//
-    //val scalarRegWriteData_E4 = Reg(UInt(64.W))
-    //scalarRegWriteData_E4 := iex.SValu.io.out.bits.vd
+    merge.io.in.aluIn <> iex.io.out
+    merge.io.in.permIn <> iex.io.permOut
+    commit.io.in.commitInfo <> merge.io.out.commitInfo
+    commit.io.in.excpInfo <> iex.io.excpInfo
+    io.out.rvuCommit <> commit.io.out.commitInfo
+    decoder.io.exceptionOut := commit.io.out.commitInfo.exception_vld
 
-    io.out.rvuCommit.commit_vld      := split.io.out.commitInfo.valid
-    io.out.rvuCommit.exception_vld   := false.B
-    io.out.rvuCommit.update_vl       := false.B
-    io.out.rvuCommit.update_vl_data  := 0.U
-    io.out.rvuCommit.illegal_inst    := false.B
-    io.out.rvuCommit.return_data_vld := split.io.out.commitInfo.bits.uopAttribute.scalarRegWriteEn
-    io.out.rvuCommit.return_data     := split.io.out.commitInfo.bits.data
-    io.out.rvuCommit.return_reg_idx  := split.io.out.commitInfo.bits.uopAttribute.ldest
-    //io.out.rvuExtra.vpu_ready := 
+    svlsuWrapper.io.mUop <> split.io.out.mUop
+    svlsuWrapper.io.mUopMergeAttr <> split.io.out.mUopMergeAttr
+    split.io.vLSUXcpt := Mux(svlsuWrapper.io.lsuOut.valid, svlsuWrapper.io.lsuOut.bits.xcpt, 0.U.asTypeOf(new VLSUXcpt))
+    commit.io.in.vLSUXcpt := Mux(svlsuWrapper.io.lsuOut.valid, svlsuWrapper.io.lsuOut.bits.xcpt, 0.U.asTypeOf(new VLSUXcpt))
+    decoder.io.vLSUXcpt := Mux(svlsuWrapper.io.lsuOut.valid, svlsuWrapper.io.lsuOut.bits.xcpt, 0.U.asTypeOf(new VLSUXcpt))
+    //ChenLu change
+    split.io.lsuStallSplit := ~svlsuWrapper.io.lsuReady
+    merge.io.in.lsuIn <> svlsuWrapper.io.lsuOut
+    
+    merge.io.in.mergeInfo <> split.io.out.mUopMergeAttr  
+    regFile.io.in.readIn  <> split.io.out.toRegFileRead
+    regFile.io.in.writeIn <> merge.io.out.toRegFileWrite
 
-    //Just For Test
-    //io.out.commit_vld := regFile.io.out.writeDone
-    //io.out.alu_data := RegNext(iex.io.out.bits.toReg.bits.rfWriteData)
-    //io.rvuExtra.vpu_ready := io.decode_ready
+    //perm read register file
+    regFile.io.in.permReadIn <> iex.io.permOut
+    iex.io.permRegIn <> regFile.io.permReadOut
+
+    //stall pipeline
+    split.io.iexNeedStall := iex.io.iexNeedStall
+    //decoder.io.iexNeedStall := iex.io.iexNeedStall
+
+    //TODO: This is reserved for verification, delete it later
+    io.rfData := regFile.io.rfData
+
+    io.rvuMemory.req.valid      := svlsuWrapper.io.dataExchange.req.valid
+    io.rvuMemory.req.bits.idx   := svlsuWrapper.io.dataExchange.req.bits.idx
+    io.rvuMemory.req.bits.addr  := svlsuWrapper.io.dataExchange.req.bits.addr
+    io.rvuMemory.req.bits.cmd   := svlsuWrapper.io.dataExchange.req.bits.cmd
+    io.rvuMemory.req.bits.data  := svlsuWrapper.io.dataExchange.req.bits.data
+    io.rvuMemory.req.bits.mask  := svlsuWrapper.io.dataExchange.req.bits.mask
+
+    // io.rvuMemory.resp.ready := svlsuWrapper.io.dataExchange.resp.ready
+    svlsuWrapper.io.dataExchange.req.ready             := io.rvuMemory.req.ready
+    svlsuWrapper.io.dataExchange.resp.valid            := io.rvuMemory.resp.valid
+    svlsuWrapper.io.dataExchange.resp.bits.idx         := io.rvuMemory.resp.bits.idx
+    svlsuWrapper.io.dataExchange.resp.bits.data        := io.rvuMemory.resp.bits.data
+    svlsuWrapper.io.dataExchange.resp.bits.has_data    := io.rvuMemory.resp.bits.has_data
+    svlsuWrapper.io.dataExchange.resp.bits.mask        := io.rvuMemory.resp.bits.mask
+    svlsuWrapper.io.dataExchange.resp.bits.nack        := io.rvuMemory.resp.bits.nack
+
+    svlsuWrapper.io.dataExchange.xcpt.ma.ld := io.rvuMemory.xcpt.ma.ld
+    svlsuWrapper.io.dataExchange.xcpt.ma.st := io.rvuMemory.xcpt.ma.st
+    svlsuWrapper.io.dataExchange.xcpt.pf.ld := io.rvuMemory.xcpt.pf.ld
+    svlsuWrapper.io.dataExchange.xcpt.pf.st := io.rvuMemory.xcpt.pf.st
+    svlsuWrapper.io.dataExchange.xcpt.gf.ld := io.rvuMemory.xcpt.gf.ld
+    svlsuWrapper.io.dataExchange.xcpt.gf.st := io.rvuMemory.xcpt.gf.st
+    svlsuWrapper.io.dataExchange.xcpt.ae.ld := io.rvuMemory.xcpt.ae.ld
+    svlsuWrapper.io.dataExchange.xcpt.ae.st := io.rvuMemory.xcpt.ae.st
+    
+    val sboard  = new Scoreboard(NVPhyRegs, false)
+    sboard.clear(merge.io.scoreBoardCleanIO.clearEn, merge.io.scoreBoardCleanIO.clearAddr)
+    sboard.clearN(merge.io.scoreBoardCleanIO.clearMultiEn, merge.io.scoreBoardCleanIO.clearAddr, merge.io.scoreBoardCleanIO.clearNum)
+    sboard.set(split.io.scoreBoardSetIO.setEn, split.io.scoreBoardSetIO.setAddr)
+    sboard.setN(split.io.scoreBoardSetIO.setMultiEn, split.io.scoreBoardSetIO.setAddr, split.io.scoreBoardSetIO.setNum)
+    sboard.clearAll(merge.io.scoreBoardCleanIO.clearAll)    
+    split.io.scoreBoardReadIO.readBypassed1 := sboard.readBypassed(split.io.scoreBoardReadIO.readAddr1)
+    split.io.scoreBoardReadIO.readBypassed2 := sboard.readBypassed(split.io.scoreBoardReadIO.readAddr2)
+    split.io.scoreBoardReadIO.readBypassed3 := sboard.readBypassed(split.io.scoreBoardReadIO.readAddr3)
+    split.io.scoreBoardReadIO.readBypassed4 := sboard.readBypassed(split.io.scoreBoardReadIO.readMaskAddr)
+    split.io.scoreBoardReadIO.readBypassed1N := sboard.readBypassedN(split.io.scoreBoardReadIO.readNum1, split.io.scoreBoardReadIO.readAddr1)
+    split.io.scoreBoardReadIO.readBypassed2N := sboard.readBypassedN(split.io.scoreBoardReadIO.readNum2, split.io.scoreBoardReadIO.readAddr2)
+    split.io.scoreBoardReadIO.readBypassed3N := sboard.readBypassedN(1.U, split.io.scoreBoardReadIO.readAddr3)
     io.in.ready := decoder.io.in.ready
 }
 
 object Main extends App {
+    
   println("Generating the VPU Core hardware")
   emitVerilog(new SmartVector(), Array("--target-dir", "generated"))
 }

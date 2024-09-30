@@ -61,9 +61,13 @@ class VFCMP(val expWidth: Int, val precision: Int) extends Module {
 
   // difference comparing to cmp insts:
   // +0 == -0, but max insts should output +0
+//  val minmaxSelA = decode_b.isNaN ||
+//                   (!decode_a.isNaN && (lt ^ MAXOp)) ||
+//                   (bothZero && (fp_a.sign ^ MAXOp))
+
   val minmaxSelA = decode_b.isNaN ||
-                   (!decode_a.isNaN && (lt ^ MAXOp)) ||
-                   (bothZero && (fp_a.sign ^ MAXOp))
+                   Mux(bothZero, fp_a.sign ^ MAXOp,  (!decode_a.isNaN && (lt ^ MAXOp)))
+
   io.minmaxResult := Mux(
     bothNaN,
     FloatPoint.defaultNaNUInt(expWidth, precision),
@@ -91,6 +95,7 @@ class VFMiscDataModule(implicit val p: Parameters) extends VFPUPipelineModule {
   val fpCtrl = uop.vfpCtrl
   val typeTagIn = uop.typeTag
   val eleActives = S1Reg(VecInit(Seq(0,4).map(isActive)))
+  val narrow_eleActives = S1Reg(VecInit(Seq(0,1).map(isActive)))
 
   // sign injection & min/max (f2f)
   val signs = Seq(63,31).map( i => Mux(fpCtrl.miscSubCmd(1), vs1(i) ^ vs2(i), Mux(fpCtrl.miscSubCmd(0), ~vs1(i), vs1(i))))
@@ -114,7 +119,7 @@ class VFMiscDataModule(implicit val p: Parameters) extends VFPUPipelineModule {
   val minmaxResult = WireInit(dcmp.io.minmaxResult)
   val cmpResult = WireInit(Cat(~0.U(63.W), dcmp.io.cmpResult)) //  extend to 64 bit
   val minmaxFlags = WireInit(Cat(dcmp.io.minmaxInvalid & eleActives(0), 0.U(4.W)))
-  val cmpFlags = WireInit(Cat(dcmp.io.cmpInvalid & eleActives(0), 0.U(4.W)))
+  val cmpFlags = WireInit(Cat(dcmp.io.cmpInvalid & narrow_eleActives(0), 0.U(4.W)))
   // override when fp32
   when(typeTagIn === VFPU.S) {
     minmaxResult := Cat(scmp1.io.minmaxResult, scmp2.io.minmaxResult)
@@ -122,7 +127,7 @@ class VFMiscDataModule(implicit val p: Parameters) extends VFPUPipelineModule {
     minmaxFlags := Cat(Seq(scmp1, scmp2).zip(Seq(1,0)).
       map(x => x._1.io.minmaxInvalid & eleActives(x._2)).reduce(_|_), 0.U(4.W))
     cmpFlags := Cat(Seq(scmp1, scmp2).zip(Seq(1,0)).
-      map(x => x._1.io.cmpInvalid & eleActives(x._2)).reduce(_|_), 0.U(4.W))
+      map(x => x._1.io.cmpInvalid & narrow_eleActives(x._2)).reduce(_|_), 0.U(4.W))
   }
 
 
@@ -162,7 +167,7 @@ class VFMiscDataModule(implicit val p: Parameters) extends VFPUPipelineModule {
   val mergeResult = Seq.fill(2)(Wire(UInt(32.W)))  // default vfmv.v.f
   mergeResult(1) := Mux(!uop.ctrl.vm && !mask(0), vs2.tail(32), vs1.tail(32))  // tail32b
   mergeResult(0) := Mux(
-    !uop.ctrl.vm && ((typeTagIn === VFPU.D && !mask(0)) || (typeTagIn === VFPU.S && !mask(1))),
+    !uop.ctrl.vm && ((typeTagIn === VFPU.D && !mask(0)) || (typeTagIn === VFPU.S && !mask(4))),
     vs2.head(32),
     vs1.head(32)
   )
