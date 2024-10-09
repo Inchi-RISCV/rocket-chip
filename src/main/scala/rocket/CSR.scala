@@ -1014,8 +1014,7 @@ class CSRFile(
   io.mie.get := reg_mie
   io.mscratch.get := reg_mscratch 
   io.mideleg.get := read_mideleg
-  //zxr:change for test   io.medeleg.get := read_medeleg
-  io.medeleg.get := reg_medeleg
+  io.medeleg.get := read_medeleg
   io.minstret.get := reg_instret
   //zxr:change for test
   io.sepc.get := readEPC(reg_sepc)
