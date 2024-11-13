@@ -956,7 +956,7 @@ vectorQueue.io.dequeueInfo.ready := io.vpu_issue.ready
   //zxr: issue vector instructions during the WB stage
 
   io.vpu_issue.valid := vectorQueue.io.dequeueInfo.valid && !vpu_xcpt;
-  io.vpu_issue.bits.inst := vectorQueue.io.dequeueInfo.bits.v_inst
+  io.vpu_issue.bits.inst := Mux(vectorQueue.io.dequeueInfo.valid, vectorQueue.io.dequeueInfo.bits.v_inst, 0.U)
   io.vpu_issue.bits.rs1 := vectorQueue.io.dequeueInfo.bits.v_rs1
   io.vpu_issue.bits.rs2 := vectorQueue.io.dequeueInfo.bits.v_rs2
   io.vpu_issue.bits.frs1 := vectorQueue.io.dequeueInfo.bits.v_fp_rs1
