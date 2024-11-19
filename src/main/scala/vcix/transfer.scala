@@ -35,23 +35,68 @@ class TransferIO extends Bundle {
 class Transfer extends Module {
     val io = IO(new Bundle{
         val transfer_io = new TransferIO
+        val vcix_io     = new VcixIO
     })
 
-    val req_ext   = Reg(new TransferReqExtIO)
-    val vcix_flop = Reg(new RequestIO)
-    val resp_flop = Reg(new TransferRespIO)
+    val req_buf_data     = Reg(new TransferReqIO)
+    val req_ext          = Reg(new TransferReqExtIO)
+    val req_extF         = Reg(new TransferReqExtIO)
+    val resp_buf_data    = Reg(new ResponseIO)
 
-    val req_ext = Output(new TransferRespIO)
-    // req_ext.data3_valid := io.transfer_io.req_ext.data3_valid
-    req_ext.data3_h     := io.transfer_io.req_ext.data3_h & fill(DLEN, io.transfer_io.req_ext.data3_valid).asUInt
-
-    when(io.transfer_io.req.valid & io.transfer_io.req.ready){
-        vcix_flop.data3     := Cat(req_ext.data3_h, io.transfer_io.req.data3_l)
-        vcix_flop           <> io.transfer_io.req
+    // req_ext.data3_h     := io.transfer_io.req_ext.data3_h & fill(DLEN, io.transfer_io.req_ext.data3_valid).asUInt
+    //get data3 high 128bit
+    if(io.transfer_io.req_ext.data3_valid) {
+        req_ext.data3_h   := io.transfer_io.req_ext.data3_h
+    }
+    
+    //fot timing to add flop(buffer) 
+    if(io.vcix_io.req.ready && io.transfer_io.req.valid) {
+        req_buf_data :=  io.transfer_io.req
+        req_extF     :=  req_ext
     }
 
-    when(io.transfer_io.resp.valid & io.transfer_io.resp.ready) {
-        resp_flop <> io.transfer_io.resp_flop
+    //consider only one data ready
+    if(io.transfer_io.req.valid)
+        io.vcix_io.req.valid   := true.B
+    else if(io.vcix_io.req.ready)
+        io.vcix_io.req.valid   := false.B
+       
+    //when buffer is empty, save data to buffer to reduce latency
+    io.transfer_io.req.ready := io.vcix_io.req.ready || ~io.vcix_io.req.valid
+
+    io.vcix_io.req          <> req_buf_data
+    io.vcix_io.req.data3    := Cat(req_extF.data3_h, req_buf_data.data3_l)
+
+
+    if(io.vcix_io.resp.valid){
+        io.transfer_io.resp.valid   := true.B
     }
+    else if(io.transfer_io.resp.ready){
+        io.transfer_io.resp.valid   := false.B
+    }
+
+    if(io.vcix_io.resp.ready && io.vcix_io.resp.valid){
+        resp_buf_data  := io.vcix_io.resp
+    }
+
+    io.vcix_io.resp.ready := io.transfer_io.resp.ready && ~io.transfer_io.resp.valid
+
+
+    // val req_ext   = Reg(new TransferReqExtIO)
+    // val vcix_flop = Reg(new RequestIO)
+    // val resp_flop = Reg(new TransferRespIO)
+
+    // val req_ext = Output(new TransferRespIO)
+    // // req_ext.data3_valid := io.transfer_io.req_ext.data3_valid
+    // req_ext.data3_h     := io.transfer_io.req_ext.data3_h & fill(DLEN, io.transfer_io.req_ext.data3_valid).asUInt
+
+    // when(io.transfer_io.req.valid & io.transfer_io.req.ready){
+    //     vcix_flop.data3     := Cat(req_ext.data3_h, io.transfer_io.req.data3_l)
+    //     vcix_flop           <> io.transfer_io.req
+    // }
+
+    // when(io.transfer_io.resp.valid & io.transfer_io.resp.ready) {
+    //     resp_flop <> io.transfer_io.resp_flop
+    // }
 }
 

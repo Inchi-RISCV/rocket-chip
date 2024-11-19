@@ -24,5 +24,5 @@ class ResponseIO extends Bundle{
 
 class VcixIO extends Bundle{
     val req = (Decoupled(new RequestIO()))
-    val response = Flipped(Decoupled(new ResponseIO))
+    val resp = Flipped(Decoupled(new ResponseIO))
 }
